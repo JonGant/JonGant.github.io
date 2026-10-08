@@ -72,10 +72,12 @@ layout: default
     {% include sections/talks.html %}
   </section>
 
+  {% comment %} Teaching is hidden for now; remove this comment tag (and uncomment it in _data/navigation.yml) to restore.
   <section id="teaching" class="home-section">
     <h1>Teaching</h1>
     {% include sections/teaching.html %}
   </section>
+  {% endcomment %}
 
   <section id="news" class="home-section">
     <h1>{{ page.news_title | default: "News" }}</h1>

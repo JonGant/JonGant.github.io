@@ -95,8 +95,20 @@ $hero-gutter-large: 2.5rem;
 }
 
 /* Sections below the hero */
+$home-width: 64rem;
+
 #main.home {
-  max-width: 52rem;
+  max-width: $home-width;
+}
+
+/* line the header's outer edges up with the text column below */
+.layout--home .masthead__inner-wrap {
+  max-width: $home-width;
+}
+
+/* the theme toggle centres its icon in a 25px box; push it flush right */
+.layout--home .greedy-nav .visible-links #theme-toggle a {
+  justify-content: flex-end;
 }
 
 .home-section {
@@ -132,13 +144,14 @@ $hero-gutter-large: 2.5rem;
 
   @include breakpoint($medium) {
     flex-direction: row;
-    align-items: flex-start;
+    align-items: center;
   }
 }
 
 .about__photo {
   flex: 0 0 auto;
-  width: 200px;
+  align-self: center;
+  width: 300px;
   max-width: 100%;
   border-radius: 50%;
 }
