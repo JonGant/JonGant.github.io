@@ -67,6 +67,11 @@
   }
 }
 
+/* larger text on the teaching page */
+.teaching-list .archive__item-excerpt {
+  font-size: $type-size-5;
+}
+
 .archive__item-teaser {
   border-radius: $border-radius;
   overflow: hidden;

@@ -11,7 +11,7 @@ I am a fast-track Ph.D. candidate in Neuroscience at the [Graduate School of Sys
 
 Research
 ======
-My Ph.D. research investigates how animals build joint sensory-behavioral representations to estimate the state of the world while they move. By extending efficient coding frameworks to account for how head and eye movements modulate visual inputs, I developed a normative theory that explains why neural coding in the visual systems of diverse species, from rodents to primates, changes during locomotion. This work was recently published in [*Science Advances*](https://doi.org/10.1126/sciadv.aed4172) and received the COSYNE PRX Life Talk Award in 2025.
+My Ph.D. research investigates how behavior modulates sensory inputs and therefore processing. Currently, I am exploring how animals build joint sensory-behavioral representations to estimate the state of the world while they move. Previously, by extending efficient coding frameworks to account for how locomotion modulates visual inputs, I developed a normative theory that explains why neural coding in the visual systems of diverse species, from rodents to primates, changes during locomotion. This work was recently published in [*Science Advances*](https://doi.org/10.1126/sciadv.aed4172) and received the COSYNE PRX Life Talk Award in 2025.
 
 Background
 ======
