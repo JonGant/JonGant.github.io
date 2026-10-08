@@ -2,23 +2,5 @@
 layout: archive
 title: "Presentations"
 permalink: /talks/
-author_profile: true
+redirect_to: /#presentations
 ---
-
-{% if site.talkmap_link == true %}
-
-<p style="text-decoration:underline;"><a href="/talkmap.html">See a map of all the places I've given a talk!</a></p>
-
-{% endif %}
-
-<h2>Talks</h2><hr />
-{% for post in site.talks reversed %}
-  {% if post.type contains "Poster" %}{% continue %}{% endif %}
-  {% include archive-single-talk.html %}
-{% endfor %}
-
-<h2>Posters</h2><hr />
-{% for post in site.talks reversed %}
-  {% unless post.type contains "Poster" %}{% continue %}{% endunless %}
-  {% include archive-single-talk.html %}
-{% endfor %}

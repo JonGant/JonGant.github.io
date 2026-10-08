@@ -1,0 +1,12 @@
+{% include base_path %}
+
+{% if site.posts.size > 0 %}
+  {% for post in site.posts limit: 10 %}
+    {% include archive-single.html %}
+  {% endfor %}
+  {% if site.posts.size > 10 %}
+    <p><a href="{{ base_path }}/year-archive/">See all posts</a></p>
+  {% endif %}
+{% else %}
+  <p>Nothing here yet. Check back soon!</p>
+{% endif %}

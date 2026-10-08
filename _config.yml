@@ -9,7 +9,7 @@
 # Basic Site Settings
 locale                   : "en-US"
 site_theme               : "default"
-title                    : "Jonathan Gant, Ph.D. Candidate"
+title                    : "Jonathan Gant"
 title_separator          : "-"
 name                     : &name "Jonathan Gant"
 description              : &description "Ph.D. Candidate in Neuroscience"
@@ -53,7 +53,7 @@ author:
 
   # Social media
   artstation       : # Username
-  bluesky          : # "bsky.app" # Replace this with you Bluesky username
+  bluesky          : jongant.bsky.social # "bsky.app" # Replace this with you Bluesky username
   facebook         : # Username
   flickr           : # Username
   foursquare       : # Username
@@ -70,7 +70,7 @@ author:
   steam            : # Username
   telegram         : # URL
   tumblr           : # Username
-  twitter          : # Username for X / Twitter
+  twitter          : jongant # Username for X / Twitter
   vine             : # Username
   weibo            : # Username
   wikipedia        : # Username
