@@ -1,0 +1,57 @@
+{
+ "format": "motion-lens-2",
+ "K": 3,
+ "T": 15,
+ "P": 16,
+ "arrays": {
+  "encV": {
+   "offset": 0,
+   "length": 11520,
+   "dtype": "float16",
+   "shape": [
+    3,
+    3840
+   ]
+  },
+  "encG": {
+   "offset": 23040,
+   "length": 135,
+   "dtype": "float16",
+   "shape": [
+    3,
+    45
+   ]
+  },
+  "decG": {
+   "offset": 23310,
+   "length": 135,
+   "dtype": "float16",
+   "shape": [
+    3,
+    45
+   ]
+  },
+  "showV": {
+   "offset": 23580,
+   "length": 11520,
+   "dtype": "float16",
+   "shape": [
+    3,
+    3840
+   ]
+  }
+ },
+ "downsample": 20,
+ "gyroPerPxPerFrame": 0.571,
+ "show": [
+  {
+   "name": "Yaw"
+  },
+  {
+   "name": "Pitch"
+  },
+  {
+   "name": "Roll"
+  }
+ ]
+}

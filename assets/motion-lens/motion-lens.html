@@ -1,0 +1,821 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Seeing Through Motion</title>
+<!--
+  Lens demo: a lens moves over a natural image (drag it, or let it wander); its motion is
+  treated as camera rotation, and the cards show how a few model units respond.
+
+  FILES (same folder; serve over http, not file://): forest.png, model.json + model.bin.
+  Without the model only the lens is shown. Without the image, a procedural forest is drawn.
+
+  EMBED MODE (?embed): used by the website hero. Hides the status line, draws the image at the
+  full width (its full height, or cropped to the iframe's height) with the cards over its bottom
+  right, and publishes the image height to the host's .hero element (--hero-image-h) so the
+  page can size the iframe. When the host overlays its text on the image's left, the lens stays
+  in the right part (embedLensMinX). Also lets vertical swipes scroll the page on touch screens,
+  and pauses while scrolled out of view.
+-->
+<style>
+  :root{
+    --bg:#07080a; --fg:#e9e6df; --muted:#8c8981;
+    --card:rgba(16,18,22,.78); --line:rgba(255,255,255,.09);
+  }
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+    overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
+  #stage{position:fixed;inset:0;width:100%;height:100%;display:block}
+  #stage.steering{cursor:none}   /* the lens replaces the cursor only where it can follow it */
+  #hint{position:fixed;top:18px;left:20px;font-size:13px;line-height:1.5;color:var(--muted);
+    letter-spacing:.02em;transition:opacity 1.2s ease;pointer-events:none}
+  #hint b{color:var(--fg);font-weight:600}
+  #status{position:fixed;top:18px;right:20px;font-size:11px;color:var(--muted);
+    opacity:.7;pointer-events:none;text-align:right}
+  #panel{position:fixed;left:0;right:0;bottom:0;display:flex;gap:10px;justify-content:center;
+    padding:14px 16px calc(14px + env(safe-area-inset-bottom));pointer-events:none}
+  .card{width:clamp(80px,23vw,214px);background:var(--card);border:1px solid var(--line);
+    border-radius:12px;padding:10px;box-sizing:border-box;backdrop-filter:blur(8px);
+    -webkit-backdrop-filter:blur(8px);transition:box-shadow .15s linear}
+  .head{display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:8px;white-space:nowrap}
+  .head .dot{width:8px;height:8px;border-radius:50%;background:var(--c);flex:none}
+  .head .name{font-weight:600;letter-spacing:.03em;overflow:hidden;text-overflow:ellipsis}
+  .head .val{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--muted);font-size:11px}
+  .body{display:flex;gap:8px;align-items:stretch}
+  .sq{width:64px;height:64px;border-radius:6px;image-rendering:pixelated;flex:none}
+  .pair{display:flex;gap:6px;flex:none}
+  .pair figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:3px}
+  .pair figcaption{font-size:9px;color:var(--muted);letter-spacing:.05em;text-transform:uppercase}
+  .pair .sq{width:44px;height:44px}
+  .trace{flex:1;min-width:0;height:64px}
+  .bars{display:grid;grid-template-columns:auto 1fr;gap:4px 6px;align-items:center;margin-top:8px;
+    font-size:9px;color:var(--muted);letter-spacing:.05em;text-transform:uppercase}
+  .bar{height:4px;border-radius:2px;background:rgba(255,255,255,.07);overflow:hidden}
+  .bar i{display:block;height:100%;width:0;background:var(--c);border-radius:2px}
+  .bar.g i{opacity:.55}
+  .legend{display:flex;gap:8px;font-size:9px;color:var(--muted);margin-top:6px;letter-spacing:.04em}
+  .legend span::before{content:"";display:inline-block;width:10px;height:0;margin-right:4px;vertical-align:middle;
+    border-top:1.5px solid currentColor}
+  .legend .dash::before{border-top-style:dashed}
+  /* embed: image above a bottom strip; cards on the strip's right, the host's text on its left */
+  .embed body{touch-action:pan-y}
+  .embed #status{display:none}
+  .embed #hint{left:auto;right:20px;text-align:right}
+  .embed #panel{justify-content:flex-end;padding:0 16px 14px}   /* over the image, bottom right */
+  .embed .card{width:clamp(80px,15vw,200px)}
+  @media (max-width:640px){ .embed #panel{display:none} }
+  @media (max-width:640px){
+    #panel{gap:6px;padding:10px 8px calc(10px + env(safe-area-inset-bottom))}
+    .card{padding:7px}
+    .body{flex-direction:column}
+    .sq{width:100%;height:auto;aspect-ratio:1}
+    .pair .sq{width:100%;height:auto}
+    .pair{width:100%}
+    .pair figure{flex:1}
+    .trace{height:34px;flex:none}
+    .legend,.bars span{display:none}
+    .bars{grid-template-columns:1fr}
+    #hint{font-size:12px;left:16px;top:14px}
+    #status{display:none}
+  }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div id="hint"><b>Move the lens to look around.<br>Draw circles to roll.</b></div>
+<div id="status"></div>
+<div id="panel"></div>
+
+<script>
+(() => {
+"use strict";
+
+/* ===================== CONFIG ===================== */
+const CONFIG = {
+  imageUrl: "forest.png",
+  modelUrl: "model.json",           // + model.bin next to it
+
+  modelFps: 30,                     // training frame rate
+  basisSlowdown: 2,                 // basis-function animations play this many times slower
+  barSmoothing: 0.3,                // s, time constant of the vis / behav activation bars
+  behavBarScale: [1.8, 1.8, 1],     // behav bar length relative to the vis bar, per card (yaw, pitch, roll)
+  downsample: null,                 // null = model.json's (training: 20); image px per model px
+
+  // Lens: one model patch, P·downsample image pixels square
+  maxLensFraction: 0.6,             // of the smaller screen side; the image is zoomed out to fit
+  lensRadius: 10,
+  outsideVisibility: 0.16,          // brightness of the image outside the lens (0 = hidden)
+  // embed, text overlaid: gradient behind the host's text (drawn here, so the cards stay on top)
+  textShade: [0.7, 0.55],           // opacity at the left edge, at the text's right edge
+  textFade: 220,                    // px past the text over which it fades out
+  lensFollow: 0.06,                 // s, how tightly the lens follows the cursor
+
+  // Motion → gyro (model units: training gyro std)
+  gyroPerPxPerFrame: null,          // null = model.json's calibration; per model px / frame
+  rollPerDeg: 1/45,                 // per deg/s of lens roll
+  gyroClip: 6,
+  rollGain: 0.12,
+  maxRoll: 90,                      // deg/s
+
+  // Idle motion: fixations (slow smooth drift) separated by saccades (minimum-jerk jumps)
+  idleDelay: 2500,                  // ms
+  fixation: [0.5, 1.6],             // s, fixation duration range
+  saccadeAmp: [0.12, 0.38],         // fraction of the smaller screen side
+  saccadeDur: [0.18, 0.0012],       // s: intercept + slope per px (main sequence); peak speed ≈ 1.9·amp/dur
+  saccadeRoll: 10,                  // deg, sd of the roll change per saccade (pulled back toward upright)
+  driftSigma: 14,                   // px/s, drift during fixation
+  driftTau: 0.4,                    // s, drift smoothness
+  wander: [0.32, 0.3],              // saccade targets: half-extent around home (fraction of width, height)
+
+  // Where the idle lens wanders around (fraction of width, height)
+  home: [0.5, 0.42],
+  homeEmbed: [0.72, 0.42],          // embed mode, wide screens: right of the overlaid text
+  embedLensMinX: 0.5,               // embed, text overlaid: the lens stays right of this fraction of the width
+  steerPad: 0.5,                    // the pointer steers the lens this many lens sizes beyond its bounds
+
+  showStatus: true,
+};
+/* ================================================== */
+
+const T = 15, P = 16, PP = P*P, N = T*PP, NG = T*3;
+const AXES = ["Yaw", "Pitch", "Roll"];
+const GYRO_FROM = [2, 0, 1];        // display axis (yaw, pitch, roll) → model axis (pitch, roll, yaw)
+const COLORS = ["#f2a541", "#4fb3bf", "#c77dff"];
+const DEG = Math.PI/180;
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const EMBED = new URLSearchParams(location.search).has("embed");
+if (EMBED) document.documentElement.classList.add("embed");
+
+const stage = document.getElementById("stage");
+const ctx = stage.getContext("2d");
+const patchC = document.createElement("canvas"); patchC.width = patchC.height = P;   // model's view
+const pctx = patchC.getContext("2d", { willReadFrequently: true });
+const inputC = document.createElement("canvas"); inputC.width = inputC.height = P;
+const ictx = inputC.getContext("2d");
+const hintEl = document.getElementById("hint");
+const statusEl = document.getElementById("status");
+const panelEl = document.getElementById("panel");
+
+let W = 0, H = 0, dpr = 1, DS = 20;
+let scene = null, sceneLow = null, img = { s: 1, ox: 0, oy: 0 };
+let model = null;
+let units = [];                     // shown units
+let cards = [], patchCard = null;
+
+// ring buffers
+const frames = Array.from({ length: T }, () => new Float32Array(PP));
+const gyro = new Float32Array(NG);
+let head = -1, filled = 0;
+const clipX = new Float32Array(N), clipG = new Float32Array(NG);
+let clipMean = 0, clipSd = 1;
+let aV = null, aB = null;
+let unitAct = [0, 0, 0], unitV = [0, 0, 0], unitB = [0, 0, 0], unitMax = [1, 1, 1], unitShown = [0, 0, 0];
+let barV = [0, 0, 0], barB = [0, 0, 0];
+
+// lens state
+const lens = { x: 0, y: 0, th: 0, vx: 0, vy: 0 };
+const vel = [0, 0, 0];              // camera-frame yaw, pitch (CSS px/s), roll (deg/s)
+const gaze = { sac: false, t: 0, dur: 0, from: null, to: null, dvx: 0, dvy: 0 };
+let cursor = null, lastPt = null, sv = [0, 0], lastHeading = null, rollTarget = 0, rollVel = 0;
+let lastMoveT = -1e9, interacted = false, wasIdle = true;
+let tickAcc = 0, tickCount = 0, lastT = performance.now();
+
+/* ---------- assets ---------- */
+function loadImage(url) {
+  return new Promise(res => {
+    if (!url) return res(null);
+    const im = new Image();
+    im.onload = () => res(im); im.onerror = () => res(null);
+    im.src = url;
+  });
+}
+
+const HALF = new Float32Array(65536);
+for (let h = 0; h < 65536; h++) {
+  const s = h & 0x8000 ? -1 : 1, e = (h >> 10) & 31, m = h & 1023;
+  HALF[h] = e === 0 ? s*m*2**-24 : e === 31 ? (m ? NaN : s*Infinity) : s*(1 + m/1024)*2**(e-15);
+}
+const toF32 = h => { const f = new Float32Array(h.length); for (let i = 0; i < h.length; i++) f[i] = HALF[h[i]]; return f; };
+
+async function loadModel(url) {
+  if (!url) return null;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (j.format !== "motion-lens-2" || j.T !== T || j.P !== P) throw new Error("unsupported model.json");
+    const rb = await fetch(new URL(j.bin || "model.bin", r.url));
+    if (!rb.ok) throw new Error("model.bin missing");
+    const buf = await rb.arrayBuffer(), K = j.K;
+    const half = name => { const a = j.arrays[name]; return new Uint16Array(buf, a.offset, a.length); };
+    const gyroToDisplay = src => {                   // [K][axis][t] (pitch, roll, yaw) → [K][t][yaw, pitch, roll]
+      const o = new Float32Array(K*NG);
+      for (let k = 0; k < K; k++) for (let t = 0; t < T; t++) for (let a = 0; a < 3; a++)
+        o[k*NG + t*3 + a] = HALF[src[k*NG + GYRO_FROM[a]*T + t]];
+      return o;
+    };
+    return { K, encV: toF32(half("encV")), encG: gyroToDisplay(half("encG")),
+      decG: gyroToDisplay(half("decG")), showV: toF32(half("showV")), show: j.show,
+      downsample: j.downsample ?? 20, gyroPerPx: CONFIG.gyroPerPxPerFrame ?? j.gyroPerPxPerFrame ?? 0.5 };
+  } catch (e) { console.warn("model:", e); return null; }
+}
+
+function rng(seed) {
+  return () => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Procedural forest interior, seamlessly periodic in x and y (no mirroring needed).
+function proceduralScene() {
+  const SW = 2048, SH = 1024, c = document.createElement("canvas");
+  c.width = SW; c.height = SH;
+  const g = c.getContext("2d"), r = rng(11);
+  const gauss = () => { let u = 0; while (!u) u = r(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*r()); };
+  const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i]-v)*t));
+  const rgba = (a, al = 1) => `rgba(${a[0]},${a[1]},${a[2]},${al})`;
+  const wrapped = (x, y, ex, ey, fn) => {      // draw copies across the periodic boundary
+    for (const ox of [-SW, 0, SW]) {
+      if (x+ox+ex < 0 || x+ox-ex > SW) continue;
+      for (const oy of [-SH, 0, SH]) {
+        if (y+oy+ey < 0 || y+oy-ey > SH) continue;
+        g.save(); g.translate(ox, oy); fn(); g.restore();
+      }
+    }
+  };
+  const fog = [176, 190, 168];
+  g.fillStyle = rgba([118, 138, 112]); g.fillRect(0, 0, SW, SH);
+
+  // soft light columns through the canopy
+  for (let i = 0; i < 9; i++) {
+    const x = r()*SW, w = 50 + 220*r(), a = 0.10 + 0.14*r();
+    wrapped(x, SH/2, w, SH, () => {
+      const gr = g.createLinearGradient(x-w, 0, x+w, 0);
+      gr.addColorStop(0, "rgba(240,236,196,0)"); gr.addColorStop(0.5, `rgba(240,236,196,${a})`); gr.addColorStop(1, "rgba(240,236,196,0)");
+      g.fillStyle = gr; g.fillRect(x-w, -1, 2*w, SH+2);
+    });
+  }
+
+  const leafCols = [[38, 74, 34], [64, 104, 42], [96, 134, 52], [30, 58, 38], [120, 146, 64]];
+  const foliage = (d, fogT, n) => {
+    const size = 2.5 + 11*d*d + 2*d;
+    for (let k = 0; k < n; k++) {
+      const cx = r()*SW, cy = r()*SH, R = (30 + 90*r())*(0.5 + d), nl = Math.round(30 + 70*r());
+      const base = leafCols[Math.floor(r()*leafCols.length)];
+      for (let i = 0; i < nl; i++) {
+        const lx = cx + gauss()*R, ly = cy + gauss()*R*0.7, rx = size*(0.6 + 0.9*r()), ang = r()*Math.PI;
+        const col = mix(mix(base, [190, 210, 120], 0.35*r()*r()), fog, fogT);
+        g.fillStyle = rgba(col, 0.8 + 0.2*r());
+        wrapped(lx, ly, rx, rx, () => { g.beginPath(); g.ellipse(lx, ly, rx, rx*0.42, ang, 0, 2*Math.PI); g.fill(); });
+      }
+    }
+  };
+
+  const trunk = (d, fogT) => {
+    const w = 6 + 90*Math.pow(d, 1.6)*(0.6 + 0.8*r()), x0 = r()*SW;
+    const amp = w*0.15*r(), per = 1 + Math.floor(3*r()), ph = r()*2*Math.PI;
+    const xs = y => x0 + amp*Math.sin(2*Math.PI*per*y/SH + ph);
+    const bark = mix([r() < 0.5 ? 62 : 82, 56 + 10*r(), 46 + 8*r()], fog, fogT);
+    const dark = mix([28, 26, 22], fog, fogT), lite = mix([150, 140, 118], fog, fogT);
+    wrapped(x0, SH/2, w + amp, SH, () => {
+      const gr = g.createLinearGradient(x0 - w/2, 0, x0 + w/2, 0);
+      gr.addColorStop(0, rgba(dark)); gr.addColorStop(0.3, rgba(mix(bark, lite, 0.35)));
+      gr.addColorStop(0.6, rgba(bark)); gr.addColorStop(1, rgba(dark));
+      g.fillStyle = gr; g.beginPath();
+      for (let y = -8; y <= SH+8; y += 8) g.lineTo(xs(y) - w/2, y);
+      for (let y = SH+8; y >= -8; y -= 8) g.lineTo(xs(y) + w/2, y);
+      g.closePath(); g.fill();
+      // bark furrows and highlights
+      g.save(); g.clip(); g.lineCap = "round";
+      const n = Math.round(w*SH/260);
+      for (let i = 0; i < n; i++) {
+        const y = r()*SH, bx = xs(y) + (r()-0.5)*w, L = 8 + 50*r()*(0.4 + d);
+        const lt = r() < 0.3;
+        g.strokeStyle = lt ? rgba(lite, 0.18) : rgba(dark, 0.35);
+        g.lineWidth = 0.6 + 2.2*d*r();
+        g.beginPath(); g.moveTo(bx, y); g.lineTo(bx + (r()-0.5)*3, y + L); g.stroke();
+      }
+      // moss
+      for (let i = 0; i < w/6; i++) {
+        const y = r()*SH, bx = xs(y) - w/2 + w*0.15*r();
+        g.fillStyle = rgba(mix([88, 120, 46], fog, fogT), 0.35);
+        g.beginPath(); g.ellipse(bx, y, w*0.2, 20 + 60*r(), 0, 0, 2*Math.PI); g.fill();
+      }
+      g.restore();
+    });
+    // a few side branches
+    const nb = Math.floor(3*r());
+    for (let i = 0; i < nb; i++) {
+      const y = r()*SH, side = r() < 0.5 ? -1 : 1, L = (40 + 160*r())*(0.4 + d), dy = -(0.3 + 0.7*r())*L;
+      const sx = xs(y) + side*w*0.4;
+      wrapped(sx, y, L, L, () => {
+        g.strokeStyle = rgba(mix([48, 42, 34], fog, fogT)); g.lineCap = "round";
+        g.lineWidth = Math.max(1, w*0.12);
+        g.beginPath(); g.moveTo(sx, y); g.quadraticCurveTo(sx + side*L*0.6, y + dy*0.2, sx + side*L, y + dy); g.stroke();
+      });
+    }
+  };
+
+  const layers = 6;
+  for (let L = 0; L < layers; L++) {
+    const d = L/(layers-1), fogT = Math.pow(1-d, 1.3)*0.78;
+    foliage(d, fogT, Math.round(26 - 2*L));
+    const nt = Math.round(16 - 2*L);
+    for (let i = 0; i < nt; i++) trunk(d, fogT);
+    foliage(d, fogT, Math.round(10 - L));
+    if (L < layers-1) { g.fillStyle = rgba(fog, 0.11); g.fillRect(0, 0, SW, SH); }
+  }
+
+  // fine-grain texture so small receptive fields have something to see
+  for (let i = 0; i < 26000; i++) {
+    const x = r()*SW, y = r()*SH, lt = r() < 0.5;
+    g.fillStyle = lt ? "rgba(255,255,230,0.07)" : "rgba(0,10,0,0.09)";
+    g.fillRect(x, y, 1 + 2*r(), 1 + 2*r());
+  }
+  return c;
+}
+
+// Downsample by halving (smooth) then one final step, like an area-averaging resize.
+function downscale(src, tw, th) {
+  let cur = src, cw = src.naturalWidth || src.width, ch = src.naturalHeight || src.height;
+  while (cw/2 > tw && ch/2 > th) {
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(cw/2)); c.height = Math.max(1, Math.round(ch/2));
+    const g = c.getContext("2d"); g.imageSmoothingQuality = "high";
+    g.drawImage(cur, 0, 0, c.width, c.height);
+    cur = c; cw = c.width; ch = c.height;
+  }
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.round(tw)); c.height = Math.max(1, Math.round(th));
+  const g = c.getContext("2d"); g.imageSmoothingQuality = "high";
+  g.drawImage(cur, 0, 0, c.width, c.height);
+  return c;
+}
+
+/* ---------- model ---------- */
+function runModel(m) {
+  const { K, encV, encG } = m;
+  for (let k = 0; k < K; k++) {
+    let s = 0; const o = k*N;
+    for (let i = 0; i < N; i++) s += encV[o+i]*clipX[i];
+    aV[k] = Math.max(0, s);
+    let b = 0; const og = k*NG;
+    for (let i = 0; i < NG; i++) b += encG[og+i]*clipG[i];
+    aB[k] = Math.max(0, b);
+  }
+}
+
+function shownUnits(m) {
+  return m.show.map((s, i) => ({ name: s.name || `Unit ${i + 1}`,
+    V: m.showV.subarray(i*N, (i+1)*N), G: m.decG.subarray(i*NG, (i+1)*NG) }));
+}
+
+/* ---------- unit panel prep ---------- */
+function prepUnit(u, k) {
+  let vmax = 1e-9; for (const v of u.V) vmax = Math.max(vmax, Math.abs(v));
+  u.frames = [];
+  for (let t = 0; t < T; t++) {
+    const id = new ImageData(P, P);
+    for (let i = 0; i < PP; i++) {
+      const v = 128 + 127*u.V[t*PP+i]/vmax;           // grayscale, 0 = mid gray
+      id.data[4*i] = id.data[4*i+1] = id.data[4*i+2] = v; id.data[4*i+3] = 255;
+    }
+    u.frames.push(id);
+  }
+  u.gmax = 1e-9; for (const v of u.G) u.gmax = Math.max(u.gmax, Math.abs(v));
+  const e = [0, 0, 0]; for (let t = 0; t < T; t++) for (let a = 0; a < 3; a++) e[a] += u.G[t*3+a]**2;
+  u.domAxis = e.indexOf(Math.max(...e));
+  u.col = COLORS[u.domAxis] || COLORS[k % 3];
+  return u;
+}
+
+/* ---------- layout ---------- */
+function layout() {
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  const sw = scene.naturalWidth || scene.width, sh = scene.naturalHeight || scene.height;
+  W = innerWidth;
+  if (EMBED) {
+    // the image spans the full width; the host sizes the iframe to the image height
+    // (--hero-image-h), capped at its screen height, and the image is then cropped top and bottom
+    img.s = W/sw;
+    hostEl()?.style.setProperty("--hero-image-h", Math.round(sh*img.s) + "px");
+    H = Math.min(Math.round(sh*img.s), innerHeight);
+    embedOverlaid = textOverlaid(); embedPanelTop = panelTop();
+    // the host's text: its right edge (for the gradient behind it); where its column would run
+    // into the cards, the host keeps the text above them (--hero-cards-h)
+    let under = 0; textRight = 0;
+    try {
+      const t = hostEl().querySelector(".hero__content"), first = panelEl.firstElementChild;
+      textRight = embedOverlaid ? t.getBoundingClientRect().right - frameElement.getBoundingClientRect().left : 0;
+      if (embedOverlaid && embedPanelTop < H && first && textRight > first.getBoundingClientRect().left)
+        under = H - embedPanelTop;
+    } catch (e) {}
+    hostEl()?.style.setProperty("--hero-cards-h", under + "px");
+  } else {
+    // cover the screen, but zoom out if needed so the lens (P·DS image px) fits
+    H = innerHeight;
+    img.s = Math.max(W/sw, H/sh);
+    img.s = Math.min(img.s, CONFIG.maxLensFraction*Math.min(W, H)/(P*DS));
+  }
+  stage.style.height = H + "px";
+  stage.width = Math.round(W*dpr); stage.height = Math.round(H*dpr);
+  img.ox = (W - sw*img.s)/2; img.oy = (H - sh*img.s)/2;
+  if (!cursor) [lens.x, lens.y] = home();
+  clampLens();
+  for (const c of cards) c.size();
+  if (patchCard) patchCard.size();
+}
+
+// Embed: the host page's hero element, which gets --hero-image-h.
+function hostEl() {
+  try { return frameElement && (frameElement.closest(".hero") || frameElement.parentElement); }
+  catch (e) { return null; }
+}
+
+// Embed: is the host's text overlaid on the image (wide screens; see _sass/layout/_home.scss)?
+function textOverlaid() {
+  try { const t = hostEl()?.querySelector(".hero__content"); return !!t && parent.getComputedStyle(t).position === "absolute"; }
+  catch (e) { return false; }
+}
+
+let embedOverlaid = false, embedPanelTop = 0, textRight = 0;
+
+// top of the cards over the image (H if none)
+function panelTop() {
+  return getComputedStyle(panelEl).display !== "none" && cards.length ? H - panelEl.offsetHeight : H;
+}
+
+function home() {
+  const h = EMBED && W > 900 ? CONFIG.homeEmbed : CONFIG.home;
+  return [W*h[0], H*h[1]];
+}
+
+function lensSize() { return P*DS*img.s; }
+
+// where the lens center may go: on screen and over the image
+function lensBounds() {
+  const m = lensSize()*0.6, sw = scene.naturalWidth || scene.width, sh = scene.naturalHeight || scene.height;
+  let x0 = Math.max(0, img.ox) + m, x1 = Math.min(W, img.ox + sw*img.s) - m;
+  let y0 = Math.max(0, img.oy) + m, y1 = Math.min(H, img.oy + sh*img.s) - m;
+  if (EMBED) {
+    // stay clear of the host's text on the left and above the cards
+    if (embedOverlaid) x0 = Math.max(x0, CONFIG.embedLensMinX*W + m);
+    y1 = Math.min(y1, embedPanelTop - m);
+  }
+  return x0 < x1 && y0 < y1 ? { x0, x1, y0, y1 } : { x0: W/2, x1: W/2, y0: H/2, y1: H/2 };
+}
+
+function clampLens() {
+  const b = lensBounds();
+  lens.x = Math.min(b.x1, Math.max(b.x0, lens.x));
+  lens.y = Math.min(b.y1, Math.max(b.y0, lens.y));
+}
+
+/* ---------- panels ---------- */
+function sizeCanvas(cv) {
+  const r = cv.getBoundingClientRect();
+  cv.width = Math.max(1, Math.round(r.width*dpr)); cv.height = Math.max(1, Math.round(r.height*dpr));
+}
+
+function buildPanels() {
+  panelEl.innerHTML = "";
+  // patch card: the model's view (downsampled patch) and the motion signal
+  {
+    const el = document.createElement("div");
+    el.className = "card"; el.style.setProperty("--c", "#e9e6df");
+    el.innerHTML = `<div class="head"><span class="dot"></span><span class="name">Patch</span></div>
+      <div class="body"><canvas class="sq in"></canvas><canvas class="trace"></canvas></div>`;
+    panelEl.appendChild(el);
+    const pc = { el, inp: el.querySelector(".in"), trace: el.querySelector(".trace") };
+    pc.size = () => [pc.inp, pc.trace].forEach(sizeCanvas);
+    patchCard = pc;
+  }
+  cards = units.map((u, k) => {
+    const el = document.createElement("div");
+    el.className = "card"; el.style.setProperty("--c", u.col);
+    el.innerHTML = `<div class="head"><span class="dot"></span><span class="name">${u.name}</span></div>
+      <div class="body"><canvas class="sq filt"></canvas><canvas class="trace"></canvas></div>
+      <div class="bars"><span>vis</span><div class="bar"><i class="bv"></i></div><span>behav</span><div class="bar g"><i class="bg"></i></div></div>`;
+    panelEl.appendChild(el);
+    const off = document.createElement("canvas"); off.width = off.height = P;
+    const c = { el, u, k, off, offCtx: off.getContext("2d"),
+      filt: el.querySelector(".filt"), trace: el.querySelector(".trace"),
+      bv: el.querySelector(".bv"), bg: el.querySelector(".bg") };
+    c.size = () => [c.filt, c.trace].forEach(sizeCanvas);
+    return c;
+  });
+  requestAnimationFrame(() => { patchCard.size(); cards.forEach(c => c.size()); });
+}
+
+function traceAxes(g, w, h, pad) {
+  g.clearRect(0, 0, w, h);
+  g.strokeStyle = "rgba(255,255,255,.08)"; g.lineWidth = dpr; g.setLineDash([]);
+  g.beginPath(); g.moveTo(0, h/2); g.lineTo(w, h/2); g.stroke();
+  return { X: t => pad + (w - 2*pad)*t/(T-1), Y: v => h/2 - Math.max(-1, Math.min(1, v))*(h/2 - pad) };
+}
+
+function drawPanels() {
+  const fi = Math.floor(tickCount/CONFIG.basisSlowdown) % T;
+  const rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i+2), 16)).join(",");
+
+  // patch card (center patch)
+  if (filled === T) {
+    const pc = patchCard;
+    let g = pc.inp.getContext("2d");
+    g.imageSmoothingEnabled = false; g.drawImage(inputC, 0, 0, pc.inp.width, pc.inp.height);
+    if (model) {
+      g = pc.trace.getContext("2d");
+      const w = pc.trace.width, h = pc.trace.height, { X, Y } = traceAxes(g, w, h, 3*dpr);
+      let m = 0.3; for (let i = 0; i < NG; i++) m = Math.max(m, Math.abs(clipG[i]));
+      g.lineWidth = 1.6*dpr;
+      for (let a = 0; a < 3; a++) {
+        g.strokeStyle = COLORS[a]; g.beginPath();
+        for (let t = 0; t < T; t++) { const y = Y(clipG[t*3+a]/m); t ? g.lineTo(X(t), y) : g.moveTo(X(t), y); }
+        g.stroke();
+      }
+    }
+  }
+
+  cards.forEach(c => {
+    const u = c.u, k = c.k;
+    c.offCtx.putImageData(u.frames[fi], 0, 0);
+    const fg = c.filt.getContext("2d"); fg.imageSmoothingEnabled = false;
+    fg.drawImage(c.off, 0, 0, c.filt.width, c.filt.height);
+
+    const g = c.trace.getContext("2d"), w = c.trace.width, h = c.trace.height;
+    const { X, Y } = traceAxes(g, w, h, 3*dpr);
+    for (let a = 0; a < 3; a++) {
+      g.strokeStyle = COLORS[a]; g.globalAlpha = a === u.domAxis ? 1 : 0.35;
+      g.lineWidth = (a === u.domAxis ? 2 : 1.2)*dpr;
+      g.beginPath();
+      for (let t = 0; t < T; t++) { const y = Y(u.G[t*3+a]/u.gmax); t ? g.lineTo(X(t), y) : g.moveTo(X(t), y); }
+      g.stroke();
+    }
+    if (filled === T) {
+      const a = u.domAxis; let m = 0.3;
+      for (let t = 0; t < T; t++) m = Math.max(m, Math.abs(clipG[t*3+a]));
+      g.globalAlpha = 0.8; g.strokeStyle = "#fff"; g.lineWidth = dpr; g.setLineDash([3*dpr, 3*dpr]);
+      g.beginPath();
+      for (let t = 0; t < T; t++) { const y = Y(clipG[t*3+a]/m); t ? g.lineTo(X(t), y) : g.moveTo(X(t), y); }
+      g.stroke(); g.setLineDash([]);
+    }
+    g.globalAlpha = 0.5; g.strokeStyle = "#fff"; g.lineWidth = dpr;
+    g.beginPath(); g.moveTo(X(fi), 0); g.lineTo(X(fi), h); g.stroke(); g.globalAlpha = 1;
+
+    const v = unitShown[k];
+    c.bv.style.width = (100*Math.min(1, barV[k])).toFixed(1) + "%";
+    c.bg.style.width = (100*Math.min(1, barB[k])).toFixed(1) + "%";
+    c.el.style.boxShadow = `0 0 ${Math.round(28*v)}px rgba(${rgb(u.col)},${(0.55*v).toFixed(3)})`;
+  });
+}
+
+/* ---------- input ---------- */
+function onMove(e) {
+  // the pointer steers the lens only within (a margin around) the lens bounds; elsewhere it is a normal cursor
+  const b = lensBounds(), pad = CONFIG.steerPad*lensSize();
+  const inside = e.clientX >= b.x0 - pad && e.clientX <= b.x1 + pad && e.clientY >= b.y0 - pad && e.clientY <= b.y1 + pad;
+  stage.classList.toggle("steering", inside);
+  if (!inside) { lastPt = null; return; }
+  const t = performance.now();
+  cursor = { x: e.clientX, y: e.clientY };
+  if (lastPt && t - lastPt.t < 200) {
+    const dt = Math.max(8, t - lastPt.t)/1000;
+    const vx = (e.clientX - lastPt.x)/dt, vy = (e.clientY - lastPt.y)/dt;
+    sv[0] += (vx - sv[0])*0.35; sv[1] += (vy - sv[1])*0.35;
+    const sp = Math.hypot(sv[0], sv[1]);
+    if (sp > 150) {
+      const hd = Math.atan2(sv[1], sv[0]);
+      if (lastHeading !== null) {
+        let dh = hd - lastHeading;
+        if (dh > Math.PI) dh -= 2*Math.PI; if (dh < -Math.PI) dh += 2*Math.PI;
+        const r = (dh/dt)/DEG * CONFIG.rollGain * Math.min(1, sp/500);
+        rollTarget = Math.max(-CONFIG.maxRoll, Math.min(CONFIG.maxRoll, r));
+      }
+      lastHeading = hd;
+    } else { lastHeading = null; rollTarget *= 0.5; }
+  } else { sv = [0, 0]; lastHeading = null; }
+  lastPt = { x: e.clientX, y: e.clientY, t };
+  lastMoveT = t;
+  if (!interacted) { interacted = true; hintEl.style.opacity = 0.25; }
+}
+
+function randn() {
+  let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random();
+  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+}
+
+const rand = ([a, b]) => a + (b - a)*Math.random();
+
+function startFixation() {
+  gaze.sac = false; gaze.t = 0;
+  gaze.dur = rand(CONFIG.fixation)*(reduceMotion ? 2 : 1);
+}
+
+function startSaccade() {
+  const sc = Math.min(W, H), b = lensBounds();
+  // targets: around home, within the lens bounds
+  let [hx, hy] = home(), ex = CONFIG.wander[0]*W, ey = CONFIG.wander[1]*H;
+  const rx0 = Math.max(b.x0, hx - ex), rx1 = Math.min(b.x1, hx + ex), ry0 = Math.max(b.y0, hy - ey), ry1 = Math.min(b.y1, hy + ey);
+  if (rx0 < rx1 && ry0 < ry1) { hx = (rx0 + rx1)/2; hy = (ry0 + ry1)/2; ex = (rx1 - rx0)/2; ey = (ry1 - ry0)/2; }
+  else { hx = (b.x0 + b.x1)/2; hy = (b.y0 + b.y1)/2; ex = (b.x1 - b.x0)/2 + 1; ey = (b.y1 - b.y0)/2 + 1; }
+  let x = lens.x, y = lens.y;
+  for (let i = 0; i < 12; i++) {       // a random jump that lands in the wander region
+    const amp = rand(CONFIG.saccadeAmp)*sc*(reduceMotion ? 0.5 : 1), a = 2*Math.PI*Math.random();
+    x = lens.x + amp*Math.cos(a); y = lens.y + amp*Math.sin(a);
+    if (Math.abs(x - hx) < ex && Math.abs(y - hy) < ey) break;
+    // fallback: aim back toward home
+    x = lens.x + (hx - lens.x)*0.6 + amp*0.3*Math.cos(a); y = lens.y + (hy - lens.y)*0.6 + amp*0.3*Math.sin(a);
+  }
+  x = Math.min(b.x1, Math.max(b.x0, x)); y = Math.min(b.y1, Math.max(b.y0, y));
+  const amp = Math.hypot(x - lens.x, y - lens.y);
+  gaze.sac = true; gaze.t = 0;
+  gaze.dur = CONFIG.saccadeDur[0] + CONFIG.saccadeDur[1]*amp;
+  gaze.from = { x: lens.x, y: lens.y, th: lens.th };
+  gaze.to = { x, y, th: 0.5*lens.th + CONFIG.saccadeRoll*DEG*randn()*(reduceMotion ? 0.5 : 1) };
+}
+
+function idleGaze(dt) {
+  gaze.t += dt;
+  if (gaze.sac) {
+    // minimum-jerk profile: smooth start and stop, bell-shaped velocity
+    const u = Math.min(1, gaze.t/gaze.dur), s = u*u*u*(10 - 15*u + 6*u*u), f = gaze.from, g = gaze.to;
+    lens.x = f.x + (g.x - f.x)*s; lens.y = f.y + (g.y - f.y)*s; lens.th = f.th + (g.th - f.th)*s;
+    if (u >= 1) { gaze.dvx = gaze.dvy = 0; startFixation(); }
+  } else {
+    // fixation: slow, smooth drift (low-pass filtered noise)
+    const k = 1 - Math.exp(-dt/CONFIG.driftTau), sd = CONFIG.driftSigma*Math.sqrt(2*CONFIG.driftTau/Math.max(dt, 1e-3));
+    gaze.dvx += (sd*randn() - gaze.dvx)*k; gaze.dvy += (sd*randn() - gaze.dvy)*k;
+    lens.x += gaze.dvx*dt; lens.y += gaze.dvy*dt;
+    if (gaze.t >= gaze.dur) startSaccade();
+  }
+}
+
+function updateMotion(dt, now) {
+  const active = now - lastMoveT < CONFIG.idleDelay && cursor;
+  const px = lens.x, py = lens.y;
+  let vr;
+  if (now - lastMoveT > 60) rollTarget *= Math.exp(-dt/0.08);
+  if (active) {
+    const f = 1 - Math.exp(-dt/CONFIG.lensFollow);
+    lens.x += (cursor.x - lens.x)*f; lens.y += (cursor.y - lens.y)*f;
+    rollVel += (rollTarget - rollVel)*(1 - Math.exp(-dt/0.05));
+    vr = rollVel;
+    wasIdle = false;
+  } else {
+    if (!wasIdle) { startFixation(); wasIdle = true; }
+    const th0 = lens.th;
+    idleGaze(dt);
+    vr = (lens.th - th0)/Math.max(dt, 1e-3)/DEG; rollVel = vr;
+  }
+  if (active || !gaze.sac) clampLens();
+  lens.vx = (lens.x - px)/Math.max(dt, 1e-3); lens.vy = (lens.y - py)/Math.max(dt, 1e-3);
+  lens.th += vr*dt*DEG;
+  // camera frame: rotate screen velocity into the lens's own frame
+  const c = Math.cos(lens.th), s = Math.sin(lens.th);
+  vel[0] = c*lens.vx + s*lens.vy; vel[1] = -s*lens.vx + c*lens.vy; vel[2] = vr;
+}
+
+/* ---------- model tick ---------- */
+function modelTick() {
+  // the model's view: the lens region of the image, downsampled DS×, in the lens's frame
+  pctx.setTransform(1, 0, 0, 1, 0, 0);
+  pctx.fillStyle = "#000"; pctx.fillRect(0, 0, P, P);
+  pctx.translate(P/2, P/2);
+  pctx.rotate(-lens.th);
+  pctx.translate(-(lens.x - img.ox)/(img.s*DS), -(lens.y - img.oy)/(img.s*DS));
+  pctx.imageSmoothingEnabled = true;
+  const sw = scene.naturalWidth || scene.width, sh = scene.naturalHeight || scene.height;
+  pctx.drawImage(sceneLow, 0, 0, sw/DS, sh/DS);
+  let d;
+  try { d = pctx.getImageData(0, 0, P, P).data; }
+  catch (e) { statusEl.textContent = "image must be same-origin"; return; }
+
+  head = (head + 1) % T;
+  const fr = frames[head];
+  for (let i = 0; i < PP; i++) fr[i] = (0.299*d[4*i] + 0.587*d[4*i+1] + 0.114*d[4*i+2])/255;
+  // gyro in model units: lens moving right = +yaw, up = +pitch, counter-clockwise = +roll
+  const gp = model ? model.gyroPerPx/(img.s*DS*CONFIG.modelFps) : 0;
+  const clip = v => Math.max(-CONFIG.gyroClip, Math.min(CONFIG.gyroClip, v));
+  gyro[head*3] = clip(vel[0]*gp); gyro[head*3+1] = clip(-vel[1]*gp); gyro[head*3+2] = clip(-vel[2]*CONFIG.rollPerDeg);
+  filled = Math.min(T, filled + 1);
+  if (filled < T) return;
+
+  // assemble clip, oldest → newest; z-score it
+  let sum = 0, sq = 0;
+  for (let t = 0; t < T; t++) {
+    const f = frames[(head+1+t)%T], o = t*PP;
+    for (let i = 0; i < PP; i++) { const v = f[i]; clipX[o+i] = v; sum += v; sq += v*v; }
+    const r = ((head+1+t)%T)*3;
+    clipG[t*3] = gyro[r]; clipG[t*3+1] = gyro[r+1]; clipG[t*3+2] = gyro[r+2];
+  }
+  clipMean = sum/N; clipSd = Math.sqrt(Math.max(1e-4, sq/N - clipMean*clipMean));
+  for (let i = 0; i < N; i++) clipX[i] = (clipX[i] - clipMean)/clipSd;
+
+  // patch card image: the newest frame, in pixel units
+  const ii = ictx.createImageData(P, P);
+  for (let i = 0; i < PP; i++) {
+    const iv = Math.max(0, Math.min(1, clipX[(T-1)*PP + i]*clipSd + clipMean))*255;
+    ii.data[4*i] = ii.data[4*i+1] = ii.data[4*i+2] = iv; ii.data[4*i+3] = 255;
+  }
+  ictx.putImageData(ii, 0, 0);
+  if (!model) return;
+  runModel(model);
+
+  units.forEach((u, k) => {
+    unitV[k] = aV[k]; unitB[k] = aB[k];
+    const z = Math.hypot(unitV[k], unitB[k]);
+    unitAct[k] = z;
+    unitMax[k] = Math.max(1e-3, z, unitMax[k]*0.995);
+    unitShown[k] += (z/unitMax[k] - unitShown[k])*0.4;
+    const f = 1 - Math.exp(-1/(CONFIG.modelFps*CONFIG.barSmoothing));
+    barV[k] += (unitV[k]/unitMax[k] - barV[k])*f; barB[k] += (CONFIG.behavBarScale[k]*unitB[k]/unitMax[k] - barB[k])*f;
+  });
+}
+
+/* ---------- render ---------- */
+function render() {
+  const Ls = lensSize(), rad = Math.min(CONFIG.lensRadius, Ls/4);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  ctx.imageSmoothingEnabled = true;
+  const sw = scene.naturalWidth || scene.width, sh = scene.naturalHeight || scene.height;
+  ctx.drawImage(scene, img.ox, img.oy, sw*img.s, sh*img.s);
+
+  // darken outside the lens
+  const lp = new Path2D(); lp.roundRect(-Ls/2, -Ls/2, Ls, Ls, rad);
+  const m = new DOMMatrix().translate(lens.x, lens.y).rotate(lens.th/DEG);
+  const veil = new Path2D(); veil.rect(0, 0, W, H); veil.addPath(lp, m);
+  ctx.fillStyle = `rgba(7,8,10,${1 - CONFIG.outsideVisibility})`;
+  ctx.fill(veil, "evenodd");
+  // embed: shade behind the host's text, fading out to the right (not over the lens)
+  if (textRight > 0) {
+    const end = textRight + CONFIG.textFade, [a0, a1] = CONFIG.textShade;
+    const gr = ctx.createLinearGradient(0, 0, end, 0);
+    gr.addColorStop(0, `rgba(7,8,10,${a0})`); gr.addColorStop(textRight/end, `rgba(7,8,10,${a1})`); gr.addColorStop(1, "rgba(7,8,10,0)");
+    ctx.fillStyle = gr;
+    ctx.fill(veil, "evenodd");
+  }
+
+  // lens: the full-resolution image shows through
+  ctx.save();
+  ctx.translate(lens.x, lens.y); ctx.rotate(lens.th);
+  ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.stroke(lp);
+  ctx.lineWidth = 6; ctx.strokeStyle = "rgba(255,255,255,.06)"; ctx.stroke(lp);
+  // orientation tick (makes roll visible)
+  ctx.strokeStyle = "rgba(255,255,255,.7)"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, -Ls/2 - 4); ctx.lineTo(0, -Ls/2 - 12); ctx.stroke();
+  ctx.restore();
+}
+
+let onScreen = true;
+function loop(now) {
+  if (!onScreen || document.hidden) { lastT = now; requestAnimationFrame(loop); return; }
+  const dt = Math.min(0.05, (now - lastT)/1000); lastT = now;
+  updateMotion(dt, now);
+  tickAcc += dt;
+  const tdt = 1/CONFIG.modelFps;
+  let ticked = false;
+  if (tickAcc >= tdt) { tickAcc = Math.min(tickAcc - tdt, tdt); ticked = true; }
+  if (ticked) { modelTick(); tickCount++; }
+  render();
+  if (ticked) drawPanels();
+  requestAnimationFrame(loop);
+}
+
+/* ---------- boot ---------- */
+(async () => {
+  const [im, m] = await Promise.all([loadImage(CONFIG.imageUrl), loadModel(CONFIG.modelUrl)]);
+  scene = im || proceduralScene();
+  model = m;
+  DS = CONFIG.downsample ?? model?.downsample ?? 20;
+  const sw = scene.naturalWidth || scene.width, sh = scene.naturalHeight || scene.height;
+  sceneLow = downscale(scene, sw/DS, sh/DS);
+  if (model) {
+    aV = new Float32Array(model.K); aB = new Float32Array(model.K);
+    units = shownUnits(model).map(prepUnit);
+  }
+  if (CONFIG.showStatus) {
+    const s = [];
+    if (!im) s.push("placeholder forest");
+    if (!model) s.push("no model");
+    statusEl.textContent = s.join(" · ");
+  }
+  buildPanels();
+  layout();
+  addEventListener("resize", layout);
+  addEventListener("pointermove", onMove, { passive: true });
+  addEventListener("pointerdown", onMove, { passive: true });
+  if (EMBED) {                     // pause while the hero is scrolled out of view
+    try { new parent.IntersectionObserver(es => { onScreen = es[0].isIntersecting; }).observe(frameElement); }
+    catch (e) {}
+  }
+  requestAnimationFrame(t => { lastT = t; requestAnimationFrame(loop); });
+})();
+})();
+</script>
+</body>
+</html>

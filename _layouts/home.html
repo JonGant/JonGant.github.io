@@ -1,0 +1,85 @@
+---
+layout: default
+---
+
+{% include base_path %}
+{% assign author = site.author %}
+
+<section id="overview" class="hero">
+  <!-- Interactive visualization: assets/motion-lens/motion-lens.html. In embed mode the image spans
+       the full width at its own aspect ratio (it sets --hero-image-h), uncropped, with its cards over
+       the bottom right. The text is overlaid on the image's left on a gradient the visualization draws (below the image
+       below the large breakpoint); the lens then stays in the right half. -->
+  <div class="hero__stage">
+    <iframe id="hero-animation" class="hero__animation" src="{{ base_path }}/assets/motion-lens/motion-lens.html?embed"
+      title="Interactive visualization: a lens over a forest scene, analyzed by joint visual-vestibular filters"
+      tabindex="-1"></iframe>
+  </div>
+
+  <div class="hero__content">
+    <h1 class="hero__title">{{ page.hero.title }}</h1>
+    <div class="hero__summary">{{ page.hero.summary | markdownify }}</div>
+    <ul class="hero__links">
+      {% if author.googlescholar %}
+        <li><a href="{{ author.googlescholar }}" aria-label="Google Scholar" title="Google Scholar"><i class="ai ai-google-scholar ai-fw" aria-hidden="true"></i></a></li>
+      {% endif %}
+      {% if author.github %}
+        <li><a href="https://github.com/{{ author.github }}" aria-label="GitHub" title="GitHub"><i class="fab fa-fw fa-github" aria-hidden="true"></i></a></li>
+      {% endif %}
+      {% if author.twitter %}
+        <li><a href="https://x.com/{{ author.twitter }}" aria-label="X" title="X"><i class="fab fa-fw fa-x-twitter" aria-hidden="true"></i></a></li>
+      {% endif %}
+      {% if author.bluesky %}
+        <li><a href="https://bsky.app/profile/{{ author.bluesky }}" aria-label="Bluesky" title="Bluesky"><i class="fab fa-fw fa-bluesky" aria-hidden="true"></i></a></li>
+      {% endif %}
+      {% if author.linkedin %}
+        <li><a href="https://www.linkedin.com/in/{{ author.linkedin }}" aria-label="LinkedIn" title="LinkedIn"><i class="fab fa-fw fa-linkedin" aria-hidden="true"></i></a></li>
+      {% endif %}
+      {% if author.email %}
+        <li><a href="mailto:{{ author.email }}" aria-label="Email" title="Email"><i class="fas fa-fw fa-envelope" aria-hidden="true"></i></a></li>
+      {% endif %}
+    </ul>
+  </div>
+</section>
+
+<div id="main" class="home" role="main">
+
+  <section id="about" class="home-section">
+    <h1>About</h1>
+    <div class="about">
+      {% if author.avatar %}
+        <img class="about__photo" src="{% if author.avatar contains '://' %}{{ author.avatar }}{% else %}{{ base_path }}/images/{{ author.avatar }}{% endif %}" alt="{{ author.name }}">
+      {% endif %}
+      <div class="about__text">
+        {{ content }}
+      </div>
+    </div>
+  </section>
+
+  <section id="research" class="home-section">
+    <h1>Research Directions</h1>
+    {% capture research %}{% include sections/research.md %}{% endcapture %}
+    {{ research | markdownify }}
+  </section>
+
+  <section id="publications" class="home-section">
+    <h1>Publications</h1>
+    {% include sections/publications.html %}
+  </section>
+
+  <section id="presentations" class="home-section">
+    <h1>Presentations</h1>
+    {% include sections/talks.html %}
+  </section>
+
+  <section id="teaching" class="home-section">
+    <h1>Teaching</h1>
+    {% include sections/teaching.html %}
+  </section>
+
+  <section id="news" class="home-section">
+    <h1>{{ page.news_title | default: "News" }}</h1>
+    {% include sections/news.html %}
+  </section>
+
+</div>

@@ -1,0 +1,156 @@
+/* ==========================================================================
+   HOME (single-page layout)
+   ========================================================================== */
+
+/* Overview: the interactive visualization (the image at the full screen width, its full height
+   — it sets --hero-image-h — or cropped to fit the screen; its cards over the bottom right), with the title
+   and description overlaid on the image's left on a gradient the visualization draws; below
+   the large breakpoint the text goes below (see _layouts/home.html).
+   Always dark with light text, whatever the site theme, to match the visualization. */
+$hero-gutter: 1.25rem;
+$hero-gutter-large: 2.5rem;
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  color: #e9e6df;
+  background: #07080a;
+}
+
+.hero__stage {
+  position: relative;
+  /* the whole image height, but no taller than the screen below the masthead (the image is then
+     cropped top and bottom) */
+  height: unquote("min(var(--hero-image-h, 56.25vw), calc(100vh - #{$masthead-height}))");
+}
+
+.hero__animation {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.hero__content {
+  box-sizing: border-box;
+  padding: 1.5rem $hero-gutter 2rem;
+  /* pointer moves pass through to the visualization, except on the links */
+  pointer-events: none;
+
+  a {
+    pointer-events: auto;
+  }
+
+  /* over the image (large screens): on the left, kept above the visualization's cards where they
+     would meet; the visualization draws a gradient behind it (so its cards stay on top) */
+  @include breakpoint($large) {
+    position: absolute;
+    z-index: 1;
+    top: 0;
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    height: calc(100% - var(--hero-cards-h, 0px));
+    width: unquote("min(100%, 38rem + #{$hero-gutter-large} + 1.5rem)");
+    padding: 2rem 1.5rem 2rem $hero-gutter-large;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75), 0 0 14px rgba(0, 0, 0, 0.5);
+  }
+}
+
+.hero__title {
+  margin: 0 0 0.5em;
+  color: inherit;
+  font-size: unquote("clamp(1.6rem, 3vw, 3rem)");
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+.hero__summary p {
+  margin: 0 0 1em;
+  font-size: $type-size-4;
+  line-height: 1.5;
+}
+
+.hero__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em 1em;
+  font-size: 1.35em;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  a {
+    color: inherit;
+    text-decoration: none;
+
+    &:hover {
+      color: #8fd3e8;
+    }
+  }
+}
+
+/* Sections below the hero */
+#main.home {
+  max-width: 52rem;
+}
+
+.home-section {
+  /* keep headings clear of the fixed masthead when jumping to a section */
+  scroll-margin-top: $masthead-height + 10px;
+  padding-bottom: 1em;
+
+  > h1 {
+    margin-top: 1.5em;
+    padding-bottom: 0.25em;
+    border-bottom: 1px solid var(--global-border-color);
+  }
+
+  .archive__item-title {
+    margin-top: 1em;
+    border-bottom: none;
+  }
+
+  .teaching-list .archive__item-excerpt {
+    font-size: $type-size-5;
+  }
+}
+
+.hero {
+  scroll-margin-top: $masthead-height;
+}
+
+/* About: photo beside the text, stacked on small screens */
+.about {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5em;
+
+  @include breakpoint($medium) {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+}
+
+.about__photo {
+  flex: 0 0 auto;
+  width: 200px;
+  max-width: 100%;
+  border-radius: 50%;
+}
+
+.about__text {
+  flex: 1 1 auto;
+
+  h4 {
+    margin: 1em 0 0.25em;
+  }
+
+  ul {
+    margin-top: 0;
+  }
+}

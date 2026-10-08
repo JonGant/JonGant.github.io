@@ -1,0 +1,7 @@
+{% include base_path %}
+
+<div class="teaching-list">
+{% for post in site.teaching reversed %}
+  {% include archive-single.html %}
+{% endfor %}
+</div>
