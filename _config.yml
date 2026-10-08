@@ -22,14 +22,14 @@ repository               : "JonGant/JonGant.github.io"
 #               Additional customization can be done by editing /_includes/author-profile.html
 author:
   # Biographic information
-  avatar           : "profile.png"
+  avatar           : "profile.jpg"
   name             : "Jonathan Gant"
   pronouns         : "he/him"
   bio              : "Ph.D. Candidate in Neuroscience"
   location         : "Munich, Germany"
   employer         : "LMU Munich"
   uri              : # URL
-  email            : "gant@bio.lmu.edu" 
+  email            : "gant@bio.lmu.de" 
 
   # Academic websites
   academia         : # URL

@@ -1,7 +1,12 @@
 {
     "name": "ACADEMIC PAGES",
-    "dockerComposeFile": "../docker-compose.yaml",
-    "service": "jekyll-site",
+    // Build the Dockerfile directly rather than via docker-compose: newer Compose
+    // versions build through `buildx bake`, which refuses to read the Dockerfile
+    // the Dev Containers extension generates outside the build context.
+    "build": {
+        "dockerfile": "../Dockerfile",
+        "context": ".."
+    },
     "remoteEnv": {
         "VSCODE_SERVER_DIR": "/home/vscode/.vscode-server"
     },
@@ -9,7 +14,10 @@
         "--user",
         "1000:1000"
     ],
+    "workspaceMount": "source=${localWorkspaceFolder},target=/usr/src/app,type=bind,consistency=cached",
     "workspaceFolder": "/usr/src/app",
     "remoteUser": "vscode",
+    // Keep the Dockerfile's CMD so `jekyll serve` starts with the container
+    "overrideCommand": false,
     "forwardPorts": [4000] // Add port forwarding
 }
