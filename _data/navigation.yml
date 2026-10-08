@@ -17,8 +17,9 @@ main:
   - title: "Presentations"
     url: /#presentations
 
-  - title: "Teaching"
-    url: /#teaching
+  # Hidden for now; uncomment (and the section in _layouts/home.html) to restore.
+  # - title: "Teaching"
+  #   url: /#teaching
 
   - title: "News"
     url: /#news

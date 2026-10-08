@@ -34,5 +34,6 @@
     {% if post.date %}<p class="page__meta"><i class="fa fa-clock" aria-hidden="true"></i> {{ post.date | date: '%B %Y' }}</p>{% endif %}
     {% if post.venue %}<p class="archive__item-excerpt" itemprop="description">{{post.type}}, {{ post.venue }},  {{post.location}}</p>{% endif %}
     {% if post.excerpt %}<p class="archive__item-excerpt" itemprop="description">{{ post.excerpt | markdownify }}</p>{% endif %}
+    {% if post.videourl %}<p class="archive__item-excerpt archive__item-video"><a href="{{ post.videourl }}"><i class="fab fa-youtube" aria-hidden="true"></i> Watch the talk</a></p>{% endif %}
   </article>
 </div>
