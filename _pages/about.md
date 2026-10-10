@@ -18,7 +18,7 @@ Beyond research, I am involved in science outreach and community building. I am 
 
 #### Current
 
-* **Doctoral Researcher**, Młynarski Lab, LMU Munich, 2022 – present
+* **Doctoral Researcher**, Młynarski Lab, LMU Munich, 2023 – present
 
 #### Previous
 
